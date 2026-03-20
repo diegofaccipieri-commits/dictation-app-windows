@@ -30,5 +30,12 @@
     ],
     "createUpdaterArtifacts": "v1Compatible"
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/diegofaccipieri-commits/dictation-app-windows/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  }
 }
