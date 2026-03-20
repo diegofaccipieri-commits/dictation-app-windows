@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,9 +7,70 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="app"></div>
-    <script src="https://unpkg.com/@tauri-apps/api@2/dist/core.js"></script>
-    <script src="https://unpkg.com/@tauri-apps/api@2/dist/event.js"></script>
-    <script src="app.js"></script>
+    <div id="app">
+        <!-- Model download overlay (shown on first launch) -->
+        <div id="download-overlay" class="hidden">
+            <div class="download-content">
+                <h3>Baixando modelos...</h3>
+                <div id="download-small" class="download-item">
+                    <span>Small</span>
+                    <div class="progress-bar"><div class="progress-fill" id="progress-small"></div></div>
+                    <span class="progress-text" id="progress-small-text">0%</span>
+                </div>
+                <div id="download-turbo" class="download-item">
+                    <span>Turbo</span>
+                    <div class="progress-bar"><div class="progress-fill" id="progress-turbo"></div></div>
+                    <span class="progress-text" id="progress-turbo-text">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main content -->
+        <div id="status-bar">
+            <span id="status-icon">●</span>
+            <span id="status-text">Ready</span>
+        </div>
+
+        <textarea id="transcription" readonly placeholder="Ctrl Ctrl para ditar..."></textarea>
+
+        <div id="error-message" class="hidden"></div>
+
+        <!-- Model selectors -->
+        <div id="model-selectors">
+            <div class="model-row">
+                <label>Ditado:</label>
+                <div class="toggle-group" id="live-model-toggle">
+                    <button class="toggle-btn active" data-model="small">Small</button>
+                    <button class="toggle-btn" data-model="turbo">Turbo</button>
+                </div>
+            </div>
+            <div class="model-row">
+                <label>Documentos:</label>
+                <div class="toggle-group" id="batch-model-toggle">
+                    <button class="toggle-btn" data-model="small">Small</button>
+                    <button class="toggle-btn active" data-model="turbo">Turbo</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch status -->
+        <div id="batch-status" class="hidden">
+            <div class="progress-bar"><div class="progress-fill" id="batch-progress"></div></div>
+            <span id="batch-status-text"></span>
+        </div>
+
+        <!-- History -->
+        <div id="history">
+            <h4>Recentes</h4>
+            <ul id="history-list"></ul>
+        </div>
+
+        <!-- Footer -->
+        <div id="footer">
+            <span id="version">v1.0</span>
+            <span>Ctrl Ctrl para ditar</span>
+        </div>
+    </div>
+    <script src="app.js" type="module"></script>
 </body>
 </html>
