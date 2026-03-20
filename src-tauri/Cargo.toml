@@ -1,0 +1,31 @@
+[package]
+name = "dictation-app"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+whisper-rs = "0.16"
+cpal = "0.15"
+arboard = "3"
+hound = "3.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+crossbeam-channel = "0.5"
+reqwest = { version = "0.12", features = ["blocking"] }
+dirs = "5"
+regex = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

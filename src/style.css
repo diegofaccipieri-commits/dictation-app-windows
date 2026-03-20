@@ -1,0 +1,11 @@
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    background: #1e1e1e;
+    color: #e0e0e0;
+}
+
+#app {
+    padding: 16px;
+}
