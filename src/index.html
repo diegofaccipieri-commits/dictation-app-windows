@@ -8,7 +8,6 @@
 </head>
 <body>
     <div id="app">
-        <!-- Model download overlay (shown on first launch) -->
         <div id="download-overlay" class="hidden">
             <div class="download-content">
                 <h3>Baixando modelos...</h3>
@@ -25,7 +24,6 @@
             </div>
         </div>
 
-        <!-- Main content -->
         <div id="status-bar">
             <span id="status-icon">●</span>
             <span id="status-text">Ready</span>
@@ -35,7 +33,6 @@
 
         <div id="error-message" class="hidden"></div>
 
-        <!-- Model selectors -->
         <div id="model-selectors">
             <div class="model-row">
                 <label>Ditado:</label>
@@ -51,24 +48,40 @@
                     <button class="toggle-btn active" data-model="turbo">Turbo</button>
                 </div>
             </div>
+            <div class="model-row">
+                <label>Ativação:</label>
+                <div class="toggle-group" id="activation-key-toggle">
+                    <button class="toggle-btn active" data-key="ctrl">Ctrl+Ctrl</button>
+                    <button class="toggle-btn" data-key="win">Win+Win</button>
+                </div>
+            </div>
+            <div class="model-row">
+                <label>Tradução:</label>
+                <select id="translation-mode">
+                    <option value="off">Desligada</option>
+                    <option value="pt_en">PT -> EN</option>
+                    <option value="pt_es">PT -> ES</option>
+                    <option value="en_pt">EN -> PT</option>
+                    <option value="en_es">EN -> ES</option>
+                    <option value="es_pt">ES -> PT</option>
+                    <option value="es_en">ES -> EN</option>
+                </select>
+            </div>
         </div>
 
-        <!-- Batch status -->
         <div id="batch-status" class="hidden">
             <div class="progress-bar"><div class="progress-fill" id="batch-progress"></div></div>
             <span id="batch-status-text"></span>
         </div>
 
-        <!-- History -->
         <div id="history">
             <h4>Recentes</h4>
             <ul id="history-list"></ul>
         </div>
 
-        <!-- Footer -->
         <div id="footer">
-            <span id="version">v1.0</span>
-            <span>Ctrl Ctrl para ditar</span>
+            <span id="version">v1.0.0</span>
+            <span id="footer-hotkey">Ctrl Ctrl para ditar</span>
         </div>
     </div>
     <script src="app.js" type="module"></script>

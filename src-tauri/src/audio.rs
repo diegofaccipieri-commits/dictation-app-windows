@@ -1,8 +1,10 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat, Stream};
+use cpal::SampleFormat;
 use hound::{WavSpec, WavWriter};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -38,128 +40,198 @@ fn to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
 }
 
 pub struct AudioRecorder {
-    stream: Option<Stream>,
+    worker: Option<JoinHandle<()>>,
     raw_buffer: Arc<Mutex<Vec<f32>>>,
     resampled_buffer: Arc<Mutex<Vec<f32>>>,
-    recording: Arc<Mutex<bool>>,
-    sample_rate: Arc<Mutex<u32>>,
-    channels: Arc<Mutex<u16>>,
+    recording: Arc<AtomicBool>,
 }
 
 impl AudioRecorder {
     pub fn new() -> Self {
         Self {
-            stream: None,
+            worker: None,
             raw_buffer: Arc::new(Mutex::new(Vec::new())),
             resampled_buffer: Arc::new(Mutex::new(Vec::new())),
-            recording: Arc::new(Mutex::new(false)),
-            sample_rate: Arc::new(Mutex::new(TARGET_SAMPLE_RATE)),
-            channels: Arc::new(Mutex::new(1)),
+            recording: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn start(&mut self) -> Result<(), String> {
+        if self.recording.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
         // Clear buffers
         self.raw_buffer.lock().unwrap().clear();
         self.resampled_buffer.lock().unwrap().clear();
 
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| "No default input device found".to_string())?;
-
-        let config = device
-            .default_input_config()
-            .map_err(|e| format!("Failed to get default input config: {}", e))?;
-
-        let native_sample_rate = config.sample_rate().0;
-        let native_channels = config.channels();
-        let sample_format = config.sample_format();
-
-        *self.sample_rate.lock().unwrap() = native_sample_rate;
-        *self.channels.lock().unwrap() = native_channels;
-
         let raw_buf = Arc::clone(&self.raw_buffer);
         let resampled_buf = Arc::clone(&self.resampled_buffer);
         let recording = Arc::clone(&self.recording);
-        let sr = native_sample_rate;
-        let ch = native_channels;
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<(), String>>(1);
+        self.recording.store(true, Ordering::SeqCst);
 
-        let err_fn = |err: cpal::StreamError| {
-            eprintln!("Audio stream error: {}", err);
-        };
+        self.worker = Some(std::thread::spawn(move || {
+            let host = cpal::default_host();
+            let device = match host.default_input_device() {
+                Some(device) => device,
+                None => {
+                    let _ = ready_tx.send(Err("No default input device found".to_string()));
+                    return;
+                }
+            };
 
-        let stream_config: cpal::StreamConfig = config.into();
+            let config = match device.default_input_config() {
+                Ok(config) => config,
+                Err(e) => {
+                    let _ =
+                        ready_tx.send(Err(format!("Failed to get default input config: {}", e)));
+                    return;
+                }
+            };
 
-        let stream = match sample_format {
-            SampleFormat::F32 => device
-                .build_input_stream(
+            let native_sample_rate = config.sample_rate().0;
+            let native_channels = config.channels();
+            let sample_format = config.sample_format();
+            let err_fn = |err: cpal::StreamError| {
+                eprintln!("Audio stream error: {}", err);
+            };
+
+            let stream_config: cpal::StreamConfig = config.into();
+            let stream_result = match sample_format {
+                SampleFormat::F32 => device.build_input_stream(
                     &stream_config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        if !*recording.lock().unwrap() {
-                            return;
+                    {
+                        let raw_buf_f32 = Arc::clone(&raw_buf);
+                        let resampled_buf_f32 = Arc::clone(&resampled_buf);
+                        let recording_f32 = Arc::clone(&recording);
+                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            if !recording_f32.load(Ordering::SeqCst) {
+                                return;
+                            }
+                            raw_buf_f32.lock().unwrap().extend_from_slice(data);
+                            let mono = to_mono(data, native_channels);
+                            let resampled = resample(&mono, native_sample_rate, TARGET_SAMPLE_RATE);
+                            resampled_buf_f32
+                                .lock()
+                                .unwrap()
+                                .extend_from_slice(&resampled);
                         }
-                        // Store raw samples
-                        raw_buf.lock().unwrap().extend_from_slice(data);
-
-                        // Convert to mono, resample, and accumulate
-                        let mono = to_mono(data, ch);
-                        let resampled = resample(&mono, sr, TARGET_SAMPLE_RATE);
-                        resampled_buf.lock().unwrap().extend_from_slice(&resampled);
                     },
                     err_fn,
                     None,
-                )
-                .map_err(|e| format!("Failed to build f32 input stream: {}", e))?,
-            SampleFormat::I16 => {
-                let raw_buf_i16 = Arc::clone(&self.raw_buffer);
-                let resampled_buf_i16 = Arc::clone(&self.resampled_buffer);
-                let recording_i16 = Arc::clone(&self.recording);
-                device
-                    .build_input_stream(
-                        &stream_config,
+                ),
+                SampleFormat::I16 => device.build_input_stream(
+                    &stream_config,
+                    {
+                        let raw_buf_i16 = Arc::clone(&raw_buf);
+                        let resampled_buf_i16 = Arc::clone(&resampled_buf);
+                        let recording_i16 = Arc::clone(&recording);
                         move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                            if !*recording_i16.lock().unwrap() {
+                            if !recording_i16.load(Ordering::SeqCst) {
                                 return;
                             }
-                            // Convert i16 to f32
-                            let float_data: Vec<f32> = data
-                                .iter()
-                                .map(|&s| s as f32 / i16::MAX as f32)
-                                .collect();
+
+                            let float_data: Vec<f32> =
+                                data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
 
                             raw_buf_i16.lock().unwrap().extend_from_slice(&float_data);
-
-                            let mono = to_mono(&float_data, ch);
-                            let resampled = resample(&mono, sr, TARGET_SAMPLE_RATE);
+                            let mono = to_mono(&float_data, native_channels);
+                            let resampled = resample(&mono, native_sample_rate, TARGET_SAMPLE_RATE);
                             resampled_buf_i16
                                 .lock()
                                 .unwrap()
                                 .extend_from_slice(&resampled);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| format!("Failed to build i16 input stream: {}", e))?
+                        }
+                    },
+                    err_fn,
+                    None,
+                ),
+                SampleFormat::U16 => device.build_input_stream(
+                    &stream_config,
+                    {
+                        let raw_buf_u16 = Arc::clone(&raw_buf);
+                        let resampled_buf_u16 = Arc::clone(&resampled_buf);
+                        let recording_u16 = Arc::clone(&recording);
+                        move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                            if !recording_u16.load(Ordering::SeqCst) {
+                                return;
+                            }
+
+                            let float_data: Vec<f32> = data
+                                .iter()
+                                .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
+                                .collect();
+
+                            raw_buf_u16.lock().unwrap().extend_from_slice(&float_data);
+                            let mono = to_mono(&float_data, native_channels);
+                            let resampled = resample(&mono, native_sample_rate, TARGET_SAMPLE_RATE);
+                            resampled_buf_u16
+                                .lock()
+                                .unwrap()
+                                .extend_from_slice(&resampled);
+                        }
+                    },
+                    err_fn,
+                    None,
+                ),
+                _ => {
+                    let _ = ready_tx.send(Err(format!(
+                        "Unsupported sample format: {:?}",
+                        sample_format
+                    )));
+                    return;
+                }
+            };
+
+            let stream = match stream_result {
+                Ok(stream) => stream,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(format!("Failed to build input stream: {}", e)));
+                    return;
+                }
+            };
+
+            if let Err(e) = stream.play() {
+                let _ = ready_tx.send(Err(format!("Failed to start audio stream: {}", e)));
+                return;
             }
-            _ => return Err(format!("Unsupported sample format: {:?}", sample_format)),
-        };
 
-        stream
-            .play()
-            .map_err(|e| format!("Failed to start audio stream: {}", e))?;
+            let _ = ready_tx.send(Ok(()));
 
-        *self.recording.lock().unwrap() = true;
-        self.stream = Some(stream);
+            while recording.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+
+            drop(stream);
+        }));
+
+        match ready_rx.recv_timeout(std::time::Duration::from_secs(3)) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                self.recording.store(false, Ordering::SeqCst);
+                if let Some(worker) = self.worker.take() {
+                    let _ = worker.join();
+                }
+                return Err(e);
+            }
+            Err(_) => {
+                self.recording.store(false, Ordering::SeqCst);
+                if let Some(worker) = self.worker.take() {
+                    let _ = worker.join();
+                }
+                return Err("Timed out while starting audio stream".to_string());
+            }
+        }
 
         Ok(())
     }
 
     pub fn stop(&mut self) -> Result<PathBuf, String> {
-        *self.recording.lock().unwrap() = false;
-
-        // Drop the stream to stop capture
-        self.stream.take();
+        self.recording.store(false, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
 
         let resampled = self.resampled_buffer.lock().unwrap().clone();
 
@@ -168,10 +240,13 @@ impl AudioRecorder {
         }
 
         // Write to WAV
-        let filename = format!("dictation_{}.wav", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis());
+        let filename = format!(
+            "dictation_{}.wav",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
         let path = std::env::temp_dir().join(filename);
 
         let spec = WavSpec {
@@ -201,9 +276,5 @@ impl AudioRecorder {
     pub fn current_samples(&self) -> (Vec<f32>, f64) {
         let samples = self.resampled_buffer.lock().unwrap().clone();
         (samples, TARGET_SAMPLE_RATE as f64)
-    }
-
-    pub fn is_recording(&self) -> bool {
-        *self.recording.lock().unwrap()
     }
 }

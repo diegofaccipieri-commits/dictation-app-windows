@@ -261,8 +261,16 @@ mod tests {
     #[test]
     fn test_speaker_assignment_no_gap() {
         let segs = vec![
-            Segment { text: "Hello".into(), start: 0.0, end: 2.0 },
-            Segment { text: "World".into(), start: 2.5, end: 4.0 },
+            Segment {
+                text: "Hello".into(),
+                start: 0.0,
+                end: 2.0,
+            },
+            Segment {
+                text: "World".into(),
+                start: 2.5,
+                end: 4.0,
+            },
         ];
         let labelled = assign_speakers(&segs);
         assert_eq!(labelled.len(), 2);
@@ -273,10 +281,26 @@ mod tests {
     #[test]
     fn test_speaker_assignment_with_gap() {
         let segs = vec![
-            Segment { text: "Hello".into(), start: 0.0, end: 2.0 },
-            Segment { text: "World".into(), start: 5.0, end: 7.0 },
-            Segment { text: "Again".into(), start: 7.5, end: 9.0 },
-            Segment { text: "Switch".into(), start: 12.0, end: 14.0 },
+            Segment {
+                text: "Hello".into(),
+                start: 0.0,
+                end: 2.0,
+            },
+            Segment {
+                text: "World".into(),
+                start: 5.0,
+                end: 7.0,
+            },
+            Segment {
+                text: "Again".into(),
+                start: 7.5,
+                end: 9.0,
+            },
+            Segment {
+                text: "Switch".into(),
+                start: 12.0,
+                end: 14.0,
+            },
         ];
         let labelled = assign_speakers(&segs);
         assert_eq!(labelled[0].speaker, "Falante A");

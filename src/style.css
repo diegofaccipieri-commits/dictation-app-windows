@@ -60,6 +60,16 @@ textarea#transcription {
     min-width: 80px;
 }
 
+.model-row select {
+    background: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #2a2a4a;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    min-width: 140px;
+}
+
 .toggle-group {
     display: flex;
     gap: 0;

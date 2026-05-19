@@ -5,6 +5,7 @@ use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// A single transcribed segment with timestamp information.
+#[allow(dead_code)]
 #[derive(Clone, serde::Serialize)]
 pub struct Segment {
     pub text: String,
@@ -28,9 +29,7 @@ impl Transcriber {
         let ctx = WhisperContext::new_with_params(path_str, params)
             .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
 
-        Ok(Self {
-            ctx: Arc::new(ctx),
-        })
+        Ok(Self { ctx: Arc::new(ctx) })
     }
 
     /// Build default FullParams for decoding.
@@ -53,16 +52,16 @@ impl Transcriber {
             .full(params, samples)
             .map_err(|e| format!("Whisper inference failed: {}", e))?;
 
-        let n = state
-            .full_n_segments()
-            .map_err(|e| format!("Failed to get segment count: {}", e))?;
+        let n = state.full_n_segments();
 
         let mut text = String::new();
         for i in 0..n {
-            let seg = state
-                .full_get_segment_text(i)
-                .map_err(|e| format!("Failed to get segment {} text: {}", i, e))?;
-            text.push_str(&seg);
+            if let Some(seg) = state.get_segment(i) {
+                let seg_text = seg
+                    .to_str_lossy()
+                    .map_err(|e| format!("Failed to get segment {} text: {}", i, e))?;
+                text.push_str(seg_text.as_ref());
+            }
         }
 
         Ok(text.trim().to_string())
@@ -75,6 +74,7 @@ impl Transcriber {
     }
 
     /// Read a WAV file and transcribe it, returning individual segments with timestamps.
+    #[allow(dead_code)]
     pub fn transcribe_with_segments(&self, path: &Path) -> Result<Vec<Segment>, String> {
         let samples = read_wav_16khz(path)?;
 
@@ -88,27 +88,21 @@ impl Transcriber {
             .full(params, &samples)
             .map_err(|e| format!("Whisper inference failed: {}", e))?;
 
-        let n = state
-            .full_n_segments()
-            .map_err(|e| format!("Failed to get segment count: {}", e))?;
+        let n = state.full_n_segments();
 
         let mut segments = Vec::with_capacity(n as usize);
         for i in 0..n {
-            let text = state
-                .full_get_segment_text(i)
-                .map_err(|e| format!("Failed to get segment {} text: {}", i, e))?;
-            let t0 = state
-                .full_get_segment_t0(i)
-                .map_err(|e| format!("Failed to get segment {} t0: {}", i, e))?;
-            let t1 = state
-                .full_get_segment_t1(i)
-                .map_err(|e| format!("Failed to get segment {} t1: {}", i, e))?;
+            if let Some(seg) = state.get_segment(i) {
+                let text = seg
+                    .to_str_lossy()
+                    .map_err(|e| format!("Failed to get segment {} text: {}", i, e))?;
 
-            segments.push(Segment {
-                text: text.trim().to_string(),
-                start: t0 as f64 / 100.0,
-                end: t1 as f64 / 100.0,
-            });
+                segments.push(Segment {
+                    text: text.trim().to_string(),
+                    start: seg.start_timestamp() as f64 / 100.0,
+                    end: seg.end_timestamp() as f64 / 100.0,
+                });
+            }
         }
 
         Ok(segments)
@@ -188,39 +182,83 @@ impl TranscriberManager {
         Ok(())
     }
 
-    /// Transcribe streaming samples using the Small model (low latency).
-    pub fn transcribe_streaming(&self, samples: &[f32]) -> Result<String, String> {
-        self.small
-            .as_ref()
-            .ok_or_else(|| "Small model not loaded".to_string())?
-            .transcribe_samples(samples)
+    fn get_by_name(&self, name: &str) -> Option<&Transcriber> {
+        match name {
+            "small" => self.small.as_ref(),
+            "turbo" => self.turbo.as_ref(),
+            _ => None,
+        }
     }
 
-    /// Transcribe a WAV file using the Turbo model, falling back to Small.
-    pub fn transcribe_final(&self, path: &Path) -> Result<String, String> {
+    /// Transcribe streaming samples using the preferred model, falling back to any loaded model.
+    pub fn transcribe_streaming_with_model(
+        &self,
+        samples: &[f32],
+        preferred: &str,
+    ) -> Result<String, String> {
+        if let Some(model) = self.get_by_name(preferred) {
+            return model.transcribe_samples(samples);
+        }
+
+        if let Some(small) = &self.small {
+            return small.transcribe_samples(samples);
+        }
+        if let Some(turbo) = &self.turbo {
+            return turbo.transcribe_samples(samples);
+        }
+
+        Err("No transcription model loaded".to_string())
+    }
+
+    /// Transcribe a WAV file using the preferred model, falling back to any loaded model.
+    pub fn transcribe_final_with_model(
+        &self,
+        path: &Path,
+        preferred: &str,
+    ) -> Result<String, String> {
+        if let Some(model) = self.get_by_name(preferred) {
+            return model.transcribe_file(path);
+        }
+
         if let Some(turbo) = &self.turbo {
             return turbo.transcribe_file(path);
         }
         if let Some(small) = &self.small {
             return small.transcribe_file(path);
         }
+
         Err("No transcription model loaded".to_string())
     }
 
-    /// Transcribe with segments using the Turbo model.
-    pub fn transcribe_with_segments(&self, path: &Path) -> Result<Vec<Segment>, String> {
-        self.turbo
-            .as_ref()
-            .ok_or_else(|| "Turbo model not loaded".to_string())?
-            .transcribe_with_segments(path)
+    /// Transcribe with segments using the preferred model.
+    #[allow(dead_code)]
+    pub fn transcribe_with_segments_with_model(
+        &self,
+        path: &Path,
+        preferred: &str,
+    ) -> Result<Vec<Segment>, String> {
+        if let Some(model) = self.get_by_name(preferred) {
+            return model.transcribe_with_segments(path);
+        }
+
+        if let Some(turbo) = &self.turbo {
+            return turbo.transcribe_with_segments(path);
+        }
+        if let Some(small) = &self.small {
+            return small.transcribe_with_segments(path);
+        }
+
+        Err("No transcription model loaded".to_string())
     }
 
     /// Check if the Small model is loaded and ready.
+    #[allow(dead_code)]
     pub fn is_small_ready(&self) -> bool {
         self.small.is_some()
     }
 
     /// Check if the Turbo model is loaded and ready.
+    #[allow(dead_code)]
     pub fn is_turbo_ready(&self) -> bool {
         self.turbo.is_some()
     }

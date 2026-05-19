@@ -18,10 +18,10 @@ pub fn paste_into_focused_app() -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
     let inputs = [
-        make_key_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0)),  // Ctrl down
-        make_key_input(VK_V, KEYBD_EVENT_FLAGS(0)),        // V down
-        make_key_input(VK_V, KEYEVENTF_KEYUP),             // V up
-        make_key_input(VK_CONTROL, KEYEVENTF_KEYUP),       // Ctrl up
+        make_key_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0)), // Ctrl down
+        make_key_input(VK_V, KEYBD_EVENT_FLAGS(0)),       // V down
+        make_key_input(VK_V, KEYEVENTF_KEYUP),            // V up
+        make_key_input(VK_CONTROL, KEYEVENTF_KEYUP),      // Ctrl up
     ];
 
     unsafe {

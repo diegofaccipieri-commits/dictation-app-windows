@@ -163,7 +163,10 @@ mod tests {
 
     #[test]
     fn test_strip_whisper_tokens() {
-        assert_eq!(strip_whisper_tokens("<|en|>Hello world<|0.00|>"), "Hello world");
+        assert_eq!(
+            strip_whisper_tokens("<|en|>Hello world<|0.00|>"),
+            "Hello world"
+        );
         assert_eq!(strip_whisper_tokens("No tokens here"), "No tokens here");
     }
 
