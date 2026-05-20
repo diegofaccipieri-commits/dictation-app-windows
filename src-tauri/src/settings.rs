@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+pub const MODEL_TINY: &str = "tiny";
 pub const MODEL_SMALL: &str = "small";
 pub const MODEL_TURBO: &str = "turbo";
 
@@ -27,7 +28,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            live_model: MODEL_SMALL.to_string(),
+            live_model: MODEL_TINY.to_string(),
             batch_model: MODEL_TURBO.to_string(),
             translation_mode: TRANSLATION_OFF.to_string(),
             activation_key: ACTIVATION_CTRL.to_string(),
@@ -45,10 +46,10 @@ pub fn settings_path() -> PathBuf {
 }
 
 pub fn normalize(mut s: AppSettings) -> AppSettings {
-    if s.live_model != MODEL_SMALL && s.live_model != MODEL_TURBO {
-        s.live_model = MODEL_SMALL.to_string();
+    if s.live_model != MODEL_TINY && s.live_model != MODEL_SMALL && s.live_model != MODEL_TURBO {
+        s.live_model = MODEL_TINY.to_string();
     }
-    if s.batch_model != MODEL_SMALL && s.batch_model != MODEL_TURBO {
+    if s.batch_model != MODEL_TINY && s.batch_model != MODEL_SMALL && s.batch_model != MODEL_TURBO {
         s.batch_model = MODEL_TURBO.to_string();
     }
     if !is_translation_mode_valid(&s.translation_mode) {

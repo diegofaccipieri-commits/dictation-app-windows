@@ -1,4 +1,34 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 src-tauri/target/
 dist/
-*.lock
+
+# Vulkan binaries (large precompiled files)
+src-tauri/vulkan-bin/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+debug.log
+
+# Tauri dev artifacts
+src-tauri/gen/schemas/*.bak

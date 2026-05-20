@@ -2,7 +2,10 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 const statusIcon = document.getElementById('status-icon');
+const statusSpinner = document.getElementById('status-spinner');
+const statusCheck = document.getElementById('status-check');
 const statusText = document.getElementById('status-text');
+const statusTimer = document.getElementById('status-timer');
 const transcription = document.getElementById('transcription');
 const errorMessage = document.getElementById('error-message');
 const historyList = document.getElementById('history-list');
@@ -14,6 +17,8 @@ const footerHotkey = document.getElementById('footer-hotkey');
 const translationModeSelect = document.getElementById('translation-mode');
 
 let currentState = 'idle';
+let timerStart = null;
+let timerInterval = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     await checkAndDownloadModels();
@@ -170,6 +175,7 @@ function showError(message) {
 
 function setupEventListeners() {
     listen('state-change', (event) => {
+        console.log('[state-change]', event.payload);
         currentState = event.payload?.state || 'idle';
         updateStatusUI();
     });
@@ -183,10 +189,14 @@ function setupEventListeners() {
     listen('transcription-complete', (event) => {
         const text = event.payload?.final_text || '';
         transcription.value = text;
+        currentState = 'idle';
+        showCompletion();
     });
 
     listen('transcription-error', (event) => {
         showError(event.payload?.message || 'Erro desconhecido');
+        currentState = 'idle';
+        updateStatusUI();
     });
 
     listen('download-progress', (event) => {
@@ -246,22 +256,85 @@ function setupEventListeners() {
     });
 }
 
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function startTimer() {
+    timerStart = Date.now();
+    statusTimer.classList.remove('hidden');
+    statusTimer.textContent = '0:00';
+
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        const elapsed = (Date.now() - timerStart) / 1000;
+        statusTimer.textContent = formatTime(elapsed);
+    }, 100);
+}
+
+function stopTimer() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function showCompletion() {
+    stopTimer();
+
+    statusIcon.classList.add('hidden');
+    statusIcon.classList.remove('recording');
+    statusSpinner.classList.add('hidden');
+    statusCheck.classList.remove('hidden');
+    statusTimer.classList.add('hidden');
+    statusText.textContent = 'Done';
+
+    setTimeout(() => {
+        statusCheck.classList.add('hidden');
+        statusIcon.classList.remove('hidden');
+        statusText.textContent = 'Ready';
+    }, 1000);
+}
+
 function updateStatusUI() {
+    console.log('[updateStatusUI] state:', currentState);
     switch (currentState) {
         case 'idle':
-            statusIcon.style.color = '#4ecca3';
+            stopTimer();
+            statusIcon.classList.remove('hidden', 'recording');
+            statusSpinner.classList.add('hidden');
+            statusCheck.classList.add('hidden');
+            statusTimer.classList.add('hidden');
+            statusTimer.classList.remove('recording', 'transcribing');
             statusText.textContent = 'Ready';
             break;
         case 'recording':
-            statusIcon.style.color = '#ff6b6b';
+            statusIcon.classList.remove('hidden');
+            statusIcon.classList.add('recording');
+            statusSpinner.classList.add('hidden');
+            statusCheck.classList.add('hidden');
+            statusTimer.classList.remove('transcribing');
+            statusTimer.classList.add('recording');
             statusText.textContent = 'Recording...';
+            startTimer();
             break;
         case 'transcribing':
-            statusIcon.style.color = '#ffd93d';
+            statusIcon.classList.add('hidden');
+            statusIcon.classList.remove('recording');
+            statusSpinner.classList.remove('hidden');
+            statusCheck.classList.add('hidden');
+            statusTimer.classList.remove('recording');
+            statusTimer.classList.add('transcribing');
             statusText.textContent = 'Transcribing...';
             break;
         default:
-            statusIcon.style.color = '#4ecca3';
+            stopTimer();
+            statusIcon.classList.remove('hidden', 'recording');
+            statusSpinner.classList.add('hidden');
+            statusCheck.classList.add('hidden');
+            statusTimer.classList.add('hidden');
             statusText.textContent = 'Ready';
             break;
     }

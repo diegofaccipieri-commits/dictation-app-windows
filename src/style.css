@@ -24,8 +24,71 @@ body {
     font-weight: 600;
 }
 
+#status-indicator {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 #status-icon {
     color: #4ecca3;
+    font-size: 16px;
+}
+
+#status-icon.recording {
+    color: #ff6b6b;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+#status-icon.transcribing {
+    display: none;
+}
+
+#status-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #ffd93d;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+#status-check {
+    color: #4ecca3;
+    font-size: 16px;
+    font-weight: bold;
+    animation: pop 0.3s ease-out;
+}
+
+#status-timer {
+    font-size: 12px;
+    font-family: monospace;
+    min-width: 40px;
+}
+
+#status-timer.recording {
+    color: #ff6b6b;
+}
+
+#status-timer.transcribing {
+    color: #ffd93d;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.9); }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes pop {
+    0% { transform: scale(0); }
+    70% { transform: scale(1.2); }
+    100% { transform: scale(1); }
 }
 
 textarea#transcription {
@@ -146,7 +209,7 @@ textarea#transcription {
 }
 
 .hidden {
-    display: none;
+    display: none !important;
 }
 
 #download-overlay {

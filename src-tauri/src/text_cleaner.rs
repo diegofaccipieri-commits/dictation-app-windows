@@ -57,16 +57,18 @@ static WHISPER_TOKEN_RE: LazyLock<Regex> =
 
 /// Build a case-insensitive regex for a punctuation command word.
 /// Pattern: (^|\s)WORD[.,!?;:]*(?=[\s.,!?;:]|$)
-fn build_command_regex(word: &str) -> Regex {
+fn build_command_regex(word: &str) -> Option<Regex> {
     let escaped = regex::escape(word);
     let pattern = format!(r"(?i)(^|\s){}[.,!?;:]*(?=[\s.,!?;:]|$)", escaped);
-    Regex::new(&pattern).expect("invalid punctuation command regex")
+    Regex::new(&pattern).ok()
 }
 
 static COMMAND_REGEXES: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
     PUNCTUATION_COMMANDS
         .iter()
-        .map(|(word, symbol)| (build_command_regex(word), *symbol))
+        .filter_map(|(word, symbol)| {
+            build_command_regex(word).map(|re| (re, *symbol))
+        })
         .collect()
 });
 
@@ -76,10 +78,15 @@ static COMMAND_REGEXES: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
 
 /// Main entry point: applies all cleaning steps in order.
 pub fn clean(text: &str) -> String {
-    let step1 = strip_whisper_tokens(text);
-    let step2 = strip_hallucinations(&step1);
-    let step3 = apply_punctuation_commands(&step2);
-    step3.trim().to_string()
+    // Wrap in catch_unwind to prevent regex panics from crashing the app
+    let text_owned = text.to_string();
+    std::panic::catch_unwind(|| {
+        let step1 = strip_whisper_tokens(&text_owned);
+        let step2 = strip_hallucinations(&step1);
+        let step3 = apply_punctuation_commands(&step2);
+        step3.trim().to_string()
+    })
+    .unwrap_or_else(|_| text.trim().to_string())
 }
 
 /// Remove Whisper special tokens like `<|en|>`, `<|0.00|>`, etc.

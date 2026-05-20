@@ -11,6 +11,11 @@
         <div id="download-overlay" class="hidden">
             <div class="download-content">
                 <h3>Baixando modelos...</h3>
+                <div id="download-tiny" class="download-item">
+                    <span>Tiny</span>
+                    <div class="progress-bar"><div class="progress-fill" id="progress-tiny"></div></div>
+                    <span class="progress-text" id="progress-tiny-text">0%</span>
+                </div>
                 <div id="download-small" class="download-item">
                     <span>Small</span>
                     <div class="progress-bar"><div class="progress-fill" id="progress-small"></div></div>
@@ -25,8 +30,13 @@
         </div>
 
         <div id="status-bar">
-            <span id="status-icon">●</span>
+            <div id="status-indicator">
+                <span id="status-icon">●</span>
+                <span id="status-spinner" class="hidden"></span>
+                <span id="status-check" class="hidden">✓</span>
+            </div>
             <span id="status-text">Ready</span>
+            <span id="status-timer" class="hidden">0:00</span>
         </div>
 
         <textarea id="transcription" readonly placeholder="Ctrl Ctrl para ditar..."></textarea>
@@ -37,6 +47,7 @@
             <div class="model-row">
                 <label>Ditado:</label>
                 <div class="toggle-group" id="live-model-toggle">
+                    <button class="toggle-btn" data-model="tiny">Tiny</button>
                     <button class="toggle-btn active" data-model="small">Small</button>
                     <button class="toggle-btn" data-model="turbo">Turbo</button>
                 </div>
@@ -44,6 +55,7 @@
             <div class="model-row">
                 <label>Documentos:</label>
                 <div class="toggle-group" id="batch-model-toggle">
+                    <button class="toggle-btn" data-model="tiny">Tiny</button>
                     <button class="toggle-btn" data-model="small">Small</button>
                     <button class="toggle-btn active" data-model="turbo">Turbo</button>
                 </div>
@@ -80,7 +92,7 @@
         </div>
 
         <div id="footer">
-            <span id="version">v1.0.0</span>
+            <span id="version">v1.0.9</span>
             <span id="footer-hotkey">Ctrl Ctrl para ditar</span>
         </div>
     </div>

@@ -13,9 +13,10 @@ const BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/mai
 /// Returns the filename for a given model name.
 fn model_filename(name: &str) -> &'static str {
     match name {
+        "tiny" => "ggml-tiny.bin",
         "small" => "ggml-small.bin",
         "turbo" => "ggml-large-v3-turbo.bin",
-        _ => panic!("Unknown model: {name}. Use \"small\" or \"turbo\"."),
+        _ => panic!("Unknown model: {name}. Use \"tiny\", \"small\" or \"turbo\"."),
     }
 }
 
@@ -59,7 +60,12 @@ pub fn download_model(name: &str, on_progress: impl Fn(u64, u64)) -> Result<Path
     let tmp_path = dir.join(format!("{filename}.tmp"));
 
     // Start download
-    let client = Client::new();
+    let client = Client::builder()
+        .user_agent("DictationApp/1.0")
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
     let response = client
         .get(&url)
         .send()

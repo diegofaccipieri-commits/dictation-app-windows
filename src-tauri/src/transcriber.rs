@@ -21,6 +21,9 @@ pub struct Transcriber {
 impl Transcriber {
     /// Load a Whisper model from the given GGML file path.
     pub fn new(model_path: &Path) -> Result<Self, String> {
+        let start = std::time::Instant::now();
+        eprintln!("[whisper] Loading model from {:?}", model_path);
+
         let path_str = model_path
             .to_str()
             .ok_or_else(|| "Model path contains invalid UTF-8".to_string())?;
@@ -29,6 +32,7 @@ impl Transcriber {
         let ctx = WhisperContext::new_with_params(path_str, params)
             .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
 
+        eprintln!("[whisper] Model loaded in {:?}", start.elapsed());
         Ok(Self { ctx: Arc::new(ctx) })
     }
 
@@ -42,15 +46,21 @@ impl Transcriber {
 
     /// Transcribe pre-processed 16 kHz mono f32 samples, returning the joined text.
     pub fn transcribe_samples(&self, samples: &[f32]) -> Result<String, String> {
+        let start = std::time::Instant::now();
+        eprintln!("[whisper] Starting transcription of {} samples ({:.1}s audio)", samples.len(), samples.len() as f32 / 16000.0);
+
         let mut state = self
             .ctx
             .create_state()
             .map_err(|e| format!("Failed to create whisper state: {}", e))?;
+        eprintln!("[whisper] State created in {:?}", start.elapsed());
 
         let params = Self::default_params();
+        let inference_start = std::time::Instant::now();
         state
             .full(params, samples)
             .map_err(|e| format!("Whisper inference failed: {}", e))?;
+        eprintln!("[whisper] Inference completed in {:?}", inference_start.elapsed());
 
         let n = state.full_n_segments();
 
@@ -156,8 +166,9 @@ pub fn read_wav_16khz(path: &Path) -> Result<Vec<f32>, String> {
     }
 }
 
-/// Manages Small and Turbo Whisper model instances.
+/// Manages Tiny, Small and Turbo Whisper model instances.
 pub struct TranscriberManager {
+    tiny: Option<Transcriber>,
     small: Option<Transcriber>,
     turbo: Option<Transcriber>,
 }
@@ -166,15 +177,17 @@ impl TranscriberManager {
     /// Create an empty manager with no models loaded.
     pub fn new() -> Self {
         Self {
+            tiny: None,
             small: None,
             turbo: None,
         }
     }
 
-    /// Load a model by name ("small" or "turbo").
+    /// Load a model by name ("tiny", "small" or "turbo").
     pub fn load_model(&mut self, name: &str, path: &Path) -> Result<(), String> {
         let transcriber = Transcriber::new(path)?;
         match name {
+            "tiny" => self.tiny = Some(transcriber),
             "small" => self.small = Some(transcriber),
             "turbo" => self.turbo = Some(transcriber),
             _ => return Err(format!("Unknown model name: {}", name)),
@@ -184,6 +197,7 @@ impl TranscriberManager {
 
     fn get_by_name(&self, name: &str) -> Option<&Transcriber> {
         match name {
+            "tiny" => self.tiny.as_ref(),
             "small" => self.small.as_ref(),
             "turbo" => self.turbo.as_ref(),
             _ => None,
@@ -220,11 +234,15 @@ impl TranscriberManager {
             return model.transcribe_file(path);
         }
 
-        if let Some(turbo) = &self.turbo {
-            return turbo.transcribe_file(path);
+        // Fallback: try tiny first (fastest), then small, then turbo
+        if let Some(tiny) = &self.tiny {
+            return tiny.transcribe_file(path);
         }
         if let Some(small) = &self.small {
             return small.transcribe_file(path);
+        }
+        if let Some(turbo) = &self.turbo {
+            return turbo.transcribe_file(path);
         }
 
         Err("No transcription model loaded".to_string())
@@ -262,4 +280,59 @@ impl TranscriberManager {
     pub fn is_turbo_ready(&self) -> bool {
         self.turbo.is_some()
     }
+}
+
+/// Transcribe a WAV file using the Vulkan-accelerated whisper-cli.exe
+#[cfg(windows)]
+pub fn transcribe_with_vulkan_cli(wav_path: &Path, model_path: &Path) -> Result<String, String> {
+    use std::process::Command;
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?
+        .parent()
+        .ok_or("Failed to get exe directory")?
+        .join("vulkan-bin");
+
+    let cli_path = exe_dir.join("whisper-cli.exe");
+
+    if !cli_path.exists() {
+        return Err(format!("whisper-cli.exe not found at {:?}", cli_path));
+    }
+
+    eprintln!("[vulkan] Running whisper-cli from {:?}", cli_path);
+    eprintln!("[vulkan] Model: {:?}", model_path);
+    eprintln!("[vulkan] WAV: {:?}", wav_path);
+
+    let output = Command::new(&cli_path)
+        .arg("-m")
+        .arg(model_path)
+        .arg("-f")
+        .arg(wav_path)
+        .arg("-l")
+        .arg("auto")
+        .arg("-nt") // no timestamps in output
+        .arg("-np") // no prints (cleaner output)
+        .current_dir(&exe_dir)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("Failed to run whisper-cli: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("whisper-cli failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = stdout.trim().to_string();
+
+    eprintln!("[vulkan] Result: {}", text);
+    Ok(text)
+}
+
+#[cfg(not(windows))]
+pub fn transcribe_with_vulkan_cli(_wav_path: &Path, _model_path: &Path) -> Result<String, String> {
+    Err("Vulkan CLI only available on Windows".to_string())
 }

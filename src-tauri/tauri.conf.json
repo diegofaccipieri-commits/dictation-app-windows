@@ -6,13 +6,14 @@
     "frontendDist": "../src"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "DictationApp",
         "width": 360,
         "height": 400,
         "resizable": false,
-        "visible": false,
+        "visible": true,
         "decorations": true
       }
     ],
@@ -28,14 +29,6 @@
       "icons/128x128.png",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": "v1Compatible"
-  },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/diegofaccipieri-commits/dictation-app-windows/releases/latest/download/latest.json"
-      ],
-      "pubkey": ""
-    }
+    "createUpdaterArtifacts": false
   }
 }

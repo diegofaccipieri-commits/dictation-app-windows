@@ -57,7 +57,7 @@ mod platform {
                 let hook = match SetWindowsHookExW(
                     WH_KEYBOARD_LL,
                     Some(low_level_keyboard_proc),
-                    h_instance.into(),
+                    h_instance,
                     0,
                 ) {
                     Ok(hook) => hook,

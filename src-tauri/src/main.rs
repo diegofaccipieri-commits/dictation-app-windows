@@ -21,6 +21,7 @@ use std::time::Duration;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    webview::WebviewWindowBuilder,
     AppHandle, Emitter, Manager,
 };
 
@@ -60,6 +61,7 @@ struct AppState {
     activation_mode: Arc<AtomicU8>,
     streaming_active: Arc<AtomicBool>,
     hotkey_recording: Arc<AtomicBool>,
+    transcription_busy: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Serialize)]
@@ -103,18 +105,48 @@ struct ErrorEvent {
 
 #[tauri::command]
 fn check_models() -> std::collections::HashMap<String, bool> {
+    let tiny_path = models::model_path("tiny");
+    let small_path = models::model_path("small");
+    let turbo_path = models::model_path("turbo");
+    let tiny_exists = tiny_path.exists();
+    let small_exists = small_path.exists();
+    let turbo_exists = turbo_path.exists();
+
+    log_debug(&format!("tiny path: {:?}, exists: {}", tiny_path, tiny_exists));
+    log_debug(&format!("small path: {:?}, exists: {}", small_path, small_exists));
+    log_debug(&format!("turbo path: {:?}, exists: {}", turbo_path, turbo_exists));
+
     let mut map = std::collections::HashMap::new();
-    map.insert("small".to_string(), models::is_downloaded("small"));
-    map.insert("turbo".to_string(), models::is_downloaded("turbo"));
+    map.insert("tiny".to_string(), tiny_exists);
+    map.insert("small".to_string(), small_exists);
+    map.insert("turbo".to_string(), turbo_exists);
     map
 }
 
 #[tauri::command]
 fn download_model_cmd(name: String, app: AppHandle) {
     let app2 = app.clone();
+    let app3 = app.clone();
     let model_name = name.clone();
+    let model_name2 = name.clone();
+
+    eprintln!("[download] Starting download for model: {}", name);
+
+    // Emit initial progress
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            name: name.clone(),
+            downloaded: 0,
+            total: 1,
+        },
+    );
+
     std::thread::spawn(move || {
+        eprintln!("[download] Thread started for model: {}", model_name);
+
         let result = models::download_model(&model_name, |downloaded, total| {
+            eprintln!("[download] Progress {}: {}/{}", model_name, downloaded, total);
             let _ = app2.emit(
                 "download-progress",
                 DownloadProgress {
@@ -125,34 +157,71 @@ fn download_model_cmd(name: String, app: AppHandle) {
             );
         });
 
-        if let Err(e) = result {
-            emit_error(
-                &app2,
-                &format!("Erro ao baixar modelo {}: {}", model_name, e),
-            );
+        match &result {
+            Ok(path) => eprintln!("[download] Success: {:?}", path),
+            Err(e) => {
+                eprintln!("[download] Error: {}", e);
+                emit_error(
+                    &app3,
+                    &format!("Erro ao baixar modelo {}: {}", model_name2, e),
+                );
+            }
         }
     });
 }
 
 #[tauri::command]
-fn load_models(app: AppHandle, state: tauri::State<'_, AppState>) {
-    if models::is_downloaded("small") {
-        let path = models::model_path("small");
-        let mut mgr = state.transcriber_manager.lock().unwrap();
-        if let Err(e) = mgr.load_model("small", &path) {
-            emit_error(&app, &format!("Falha ao carregar Small: {}", e));
-        }
-    }
+fn load_models(app: AppHandle) {
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        log_debug("load_models thread started");
 
-    if models::is_downloaded("turbo") {
-        let path = models::model_path("turbo");
-        let mut mgr = state.transcriber_manager.lock().unwrap();
-        if let Err(e) = mgr.load_model("turbo", &path) {
-            emit_error(&app, &format!("Falha ao carregar Turbo: {}", e));
+        // Load tiny first (fastest, best for real-time)
+        if models::is_downloaded("tiny") {
+            log_debug("loading tiny model...");
+            let path = models::model_path("tiny");
+            let state = app_clone.state::<AppState>();
+            let mut mgr = state.transcriber_manager.lock().unwrap();
+            match mgr.load_model("tiny", &path) {
+                Ok(()) => log_debug("tiny model loaded successfully"),
+                Err(e) => {
+                    log_debug(&format!("tiny model load FAILED: {}", e));
+                    emit_error(&app_clone, &format!("Falha ao carregar Tiny: {}", e));
+                }
+            }
         }
-    }
 
-    let _ = app.emit("models-loaded", ());
+        if models::is_downloaded("small") {
+            log_debug("loading small model...");
+            let path = models::model_path("small");
+            let state = app_clone.state::<AppState>();
+            let mut mgr = state.transcriber_manager.lock().unwrap();
+            match mgr.load_model("small", &path) {
+                Ok(()) => log_debug("small model loaded successfully"),
+                Err(e) => {
+                    log_debug(&format!("small model load FAILED: {}", e));
+                    emit_error(&app_clone, &format!("Falha ao carregar Small: {}", e));
+                }
+            }
+        }
+
+        if models::is_downloaded("turbo") {
+            log_debug("loading turbo model...");
+            let path = models::model_path("turbo");
+            let state = app_clone.state::<AppState>();
+            let mut mgr = state.transcriber_manager.lock().unwrap();
+            match mgr.load_model("turbo", &path) {
+                Ok(()) => log_debug("turbo model loaded successfully"),
+                Err(e) => {
+                    log_debug(&format!("turbo model load FAILED: {}", e));
+                    emit_error(&app_clone, &format!("Falha ao carregar Turbo: {}", e));
+                }
+            }
+        }
+
+        log_debug("models-loaded event emitted");
+        let _ = app_clone.emit("models-loaded", ());
+    });
 }
 
 #[tauri::command]
@@ -430,7 +499,81 @@ fn emit_state_change(app: &AppHandle, value: &str) {
     );
 }
 
+fn get_overlay_position(app: &AppHandle) -> (f64, f64) {
+    let monitor = app.primary_monitor().ok().flatten();
+    if let Some(m) = monitor {
+        let size = m.size();
+        let pos = m.position();
+        (pos.x as f64 + (size.width as f64) - 130.0, pos.y as f64 + 60.0)
+    } else {
+        (100.0, 100.0)
+    }
+}
+
+fn show_overlay(app: &AppHandle) {
+    if app.get_webview_window("overlay").is_some() {
+        return;
+    }
+
+    let (x, y) = get_overlay_position(app);
+
+    let _ = WebviewWindowBuilder::new(app, "overlay", tauri::WebviewUrl::App("overlay.html?state=recording".into()))
+        .title("Recording")
+        .inner_size(110.0, 36.0)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .build();
+}
+
+fn close_overlay(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("overlay") {
+        let _ = win.close();
+    }
+}
+
+fn update_overlay_state(app: &AppHandle, state: &str) {
+    if let Some(win) = app.get_webview_window("overlay") {
+        let _ = win.close();
+    }
+
+    // Small delay to ensure window is fully closed before recreating
+    std::thread::sleep(Duration::from_millis(50));
+
+    let (x, y) = get_overlay_position(app);
+    let url = format!("overlay.html?state={}", state);
+
+    let _ = WebviewWindowBuilder::new(app, "overlay", tauri::WebviewUrl::App(url.into()))
+        .title("Recording")
+        .inner_size(110.0, 36.0)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .build();
+}
+
+fn log_debug(msg: &str) {
+    let log_path = dirs::data_dir().unwrap().join("DictationApp").join("debug.log");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "[{}] {}", chrono::Local::now().format("%H:%M:%S"), msg)
+        });
+}
+
 fn start_recording(app: &AppHandle) {
+    log_debug("start_recording called");
     let st = app.state::<AppState>();
 
     if st
@@ -443,6 +586,7 @@ fn start_recording(app: &AppHandle) {
         )
         .is_err()
     {
+        log_debug("start_recording: state was not IDLE, returning");
         return;
     }
 
@@ -451,57 +595,23 @@ fn start_recording(app: &AppHandle) {
     {
         let mut recorder = st.recorder.lock().unwrap();
         if let Err(e) = recorder.start() {
+            log_debug(&format!("start_recording: recorder.start() failed: {}", e));
             st.recording_state.store(STATE_IDLE, Ordering::SeqCst);
             emit_error(app, &format!("Falha ao iniciar gravação: {}", e));
             return;
         }
+        log_debug("start_recording: recorder started successfully");
     }
 
     st.streaming_active.store(true, Ordering::SeqCst);
     st.hotkey_recording.store(true, Ordering::SeqCst);
 
     emit_state_change(app, "recording");
-
-    let app_clone = app.clone();
-    let streaming_flag = Arc::clone(&st.streaming_active);
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(2));
-
-        if !streaming_flag.load(Ordering::SeqCst) {
-            break;
-        }
-
-        let state = app_clone.state::<AppState>();
-        if state.recording_state.load(Ordering::SeqCst) != STATE_RECORDING {
-            continue;
-        }
-
-        let (samples, _) = state.recorder.lock().unwrap().current_samples();
-        if samples.len() < 1600 {
-            continue;
-        }
-
-        let preferred = state.live_model.lock().unwrap().clone();
-        let result = state
-            .transcriber_manager
-            .lock()
-            .unwrap()
-            .transcribe_streaming_with_model(&samples, &preferred);
-
-        match result {
-            Ok(text) => {
-                let cleaned = text_cleaner::clean(&text);
-                *state.transcribed_text.lock().unwrap() = cleaned.clone();
-                let _ = app_clone.emit("streaming-update", StreamingUpdate { text: cleaned });
-            }
-            Err(e) => {
-                eprintln!("[streaming] transcription error: {}", e);
-            }
-        }
-    });
+    show_overlay(app);
 }
 
 fn stop_recording(app: &AppHandle) {
+    log_debug("stop_recording called");
     let st = app.state::<AppState>();
 
     if st
@@ -514,6 +624,7 @@ fn stop_recording(app: &AppHandle) {
         )
         .is_err()
     {
+        log_debug("stop_recording: state was not RECORDING, returning");
         return;
     }
 
@@ -523,21 +634,43 @@ fn stop_recording(app: &AppHandle) {
     let wav_path = {
         let mut recorder = st.recorder.lock().unwrap();
         match recorder.stop() {
-            Ok(path) => path,
+            Ok(path) => {
+                log_debug(&format!("stop_recording: wav saved to {:?}", path));
+                path
+            }
             Err(e) => {
+                log_debug(&format!("stop_recording: recorder.stop() failed: {}", e));
                 st.recording_state.store(STATE_IDLE, Ordering::SeqCst);
                 emit_state_change(app, "idle");
+                close_overlay(app);
                 emit_error(app, &format!("Falha ao encerrar gravação: {}", e));
                 return;
             }
         }
     };
 
+    // Check if a previous transcription is still running
+    if st.transcription_busy.load(Ordering::SeqCst) {
+        log_debug("transcription already in progress, aborting");
+        st.recording_state.store(STATE_IDLE, Ordering::SeqCst);
+        emit_state_change(app, "idle");
+        close_overlay(app);
+        emit_error(app, "Transcricao anterior ainda em andamento. Aguarde.");
+        let _ = std::fs::remove_file(&wav_path);
+        return;
+    }
+
     emit_state_change(app, "transcribing");
+    update_overlay_state(app, "transcribing");
 
     let fallback_text = st.transcribed_text.lock().unwrap().clone();
     let preferred_model = st.live_model.lock().unwrap().clone();
     let translation_mode = st.translation_mode.lock().unwrap().clone();
+    log_debug(&format!("stop_recording: using model {}, fallback text len: {}", preferred_model, fallback_text.len()));
+
+    // Mark transcription as busy
+    let busy_flag = Arc::clone(&st.transcription_busy);
+    busy_flag.store(true, Ordering::SeqCst);
 
     let app_clone = app.clone();
     std::thread::spawn(move || {
@@ -545,33 +678,72 @@ fn stop_recording(app: &AppHandle) {
         let app_for_worker = app_clone.clone();
         let wav_clone = wav_path.clone();
         let preferred_model_worker = preferred_model.clone();
+        let busy_flag_worker = Arc::clone(&busy_flag);
 
         std::thread::spawn(move || {
-            let state = app_for_worker.state::<AppState>();
-            let result = state
-                .transcriber_manager
-                .lock()
-                .unwrap()
-                .transcribe_final_with_model(&wav_clone, &preferred_model_worker);
-            let _ = result_tx.send(result);
+            log_debug("transcription worker started");
+
+            // Try Vulkan CLI first (much faster with GPU acceleration)
+            let model_path = models::model_path(&preferred_model_worker);
+            log_debug(&format!("trying Vulkan CLI with model: {:?}", model_path));
+
+            let result = transcriber::transcribe_with_vulkan_cli(&wav_clone, &model_path);
+
+            if result.is_err() {
+                log_debug(&format!("Vulkan CLI failed: {:?}, falling back to built-in", result));
+                // Fallback to built-in whisper-rs
+                let state = app_for_worker.state::<AppState>();
+                let mgr = match state.transcriber_manager.try_lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        log_debug("lock busy, skipping fallback");
+                        busy_flag_worker.store(false, Ordering::SeqCst);
+                        let _ = result_tx.send(Err("Lock busy".to_string()));
+                        return;
+                    }
+                };
+                let fallback_result = mgr.transcribe_final_with_model(&wav_clone, &preferred_model_worker);
+                drop(mgr);
+                busy_flag_worker.store(false, Ordering::SeqCst);
+                log_debug(&format!("fallback result: {:?}", fallback_result.as_ref().map(|s| s.len())));
+                let _ = result_tx.send(fallback_result);
+            } else {
+                busy_flag_worker.store(false, Ordering::SeqCst);
+                log_debug(&format!("Vulkan CLI result: {:?}", result.as_ref().map(|s| s.len())));
+                let _ = result_tx.send(result);
+            }
         });
 
-        let original_clean = match result_rx.recv_timeout(Duration::from_secs(45)) {
-            Ok(Ok(text)) => text_cleaner::clean(&text),
+        // Timeout: 30s for tiny, 60s for small, 120s for turbo
+        let timeout_secs = match preferred_model.as_str() {
+            "tiny" => 30,
+            "small" => 60,
+            _ => 120,
+        };
+
+        let original_clean = match result_rx.recv_timeout(Duration::from_secs(timeout_secs)) {
+            Ok(Ok(text)) => {
+                let cleaned = text_cleaner::clean(&text);
+                log_debug(&format!("transcription success, cleaned len: {}", cleaned.len()));
+                cleaned
+            }
             Ok(Err(e)) => {
-                eprintln!("[final_transcription] error: {}", e);
+                log_debug(&format!("transcription error: {}", e));
                 fallback_text.clone()
             }
             Err(_) => {
-                eprintln!("[final_transcription] timeout, using streaming fallback");
+                log_debug("transcription timeout, using fallback");
+                // Note: worker thread may still be running, but busy_flag will be cleared when it finishes
                 fallback_text.clone()
             }
         };
 
         if original_clean.is_empty() {
+            log_debug("original_clean is empty, returning to idle");
             let state = app_clone.state::<AppState>();
             state.recording_state.store(STATE_IDLE, Ordering::SeqCst);
             emit_state_change(&app_clone, "idle");
+            close_overlay(&app_clone);
             let _ = std::fs::remove_file(&wav_path);
             return;
         }
@@ -611,6 +783,10 @@ fn stop_recording(app: &AppHandle) {
         state.recording_state.store(STATE_IDLE, Ordering::SeqCst);
         emit_state_change(&app_clone, "idle");
 
+        update_overlay_state(&app_clone, "done");
+        std::thread::sleep(Duration::from_millis(800));
+        close_overlay(&app_clone);
+
         let _ = std::fs::remove_file(&wav_path);
     });
 }
@@ -634,18 +810,26 @@ fn cancel_recording(app: &AppHandle) {
     st.transcribed_text.lock().unwrap().clear();
     st.recording_state.store(STATE_IDLE, Ordering::SeqCst);
     emit_state_change(app, "idle");
+    close_overlay(app);
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        log_debug(&format!("PANIC: {:?}", info));
+    }));
+
+    log_debug("main() starting");
     let initial_settings = settings::load();
+    log_debug("settings loaded");
 
     let activation_mode = Arc::new(AtomicU8::new(hotkey_mode_from_settings(
         &initial_settings.activation_key,
     )));
     let hotkey_recording = Arc::new(AtomicBool::new(false));
+    log_debug("starting tauri builder");
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState {
             recorder: Mutex::new(audio::AudioRecorder::new()),
@@ -660,6 +844,7 @@ fn main() {
             activation_mode: Arc::clone(&activation_mode),
             streaming_active: Arc::new(AtomicBool::new(false)),
             hotkey_recording: Arc::clone(&hotkey_recording),
+            transcription_busy: Arc::new(AtomicBool::new(false)),
         })
         .invoke_handler(tauri::generate_handler![
             check_models,
@@ -772,8 +957,20 @@ fn main() {
                 })
                 .build(app)?;
 
+            // Prevent window close from terminating the app
+            if let Some(window) = app.get_webview_window("main") {
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        log_debug("Window close requested - hiding instead");
+                        api.prevent_close();
+                    }
+                });
+            }
+
             #[cfg(windows)]
             {
+                log_debug("starting hotkey listener");
+                let app_handle = app.handle().clone();
                 let (hotkey_tx, hotkey_rx) = crossbeam_channel::unbounded();
                 let hotkey_state = app_handle.state::<AppState>();
 
@@ -782,10 +979,13 @@ fn main() {
                     Arc::clone(&hotkey_state.hotkey_recording),
                     Arc::clone(&hotkey_state.activation_mode),
                 );
+                log_debug("hotkey hook installed");
 
                 let hotkey_app = app_handle.clone();
                 std::thread::spawn(move || {
+                    log_debug("hotkey receiver thread started");
                     for event in hotkey_rx {
+                        log_debug(&format!("hotkey event received: {:?}", event));
                         let state = hotkey_app.state::<AppState>();
                         match event {
                             hotkey::HotkeyEvent::ActivationPressed => {
@@ -804,8 +1004,10 @@ fn main() {
                 });
             }
 
+            log_debug("setup complete");
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error running app");
+    log_debug("app exited normally");
 }

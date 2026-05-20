@@ -5,6 +5,12 @@
 
 use arboard::Clipboard;
 
+#[cfg(windows)]
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, SendInput,
+    VIRTUAL_KEY, VK_CONTROL, VK_V,
+};
+
 /// Copy text to the system clipboard.
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
