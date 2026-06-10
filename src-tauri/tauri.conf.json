@@ -32,7 +32,7 @@
     "resources": [
       "vulkan-bin"
     ],
-    "createUpdaterArtifacts": "v2"
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
