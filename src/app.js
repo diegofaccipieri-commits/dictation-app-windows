@@ -251,8 +251,23 @@ function setupEventListeners() {
         await invoke('transcribe_folder_cmd', { path: selectedPath });
     });
 
-    listen('check-update', () => {
-        showError('Check for Updates ainda não implementado nesta build.');
+    listen('check-update', async () => {
+        try {
+            const { check } = window.__TAURI_PLUGIN_UPDATER__;
+            const update = await check();
+            if (update) {
+                const yes = confirm(`Nova versao disponivel: ${update.version}. Instalar agora?`);
+                if (yes) {
+                    await update.downloadAndInstall();
+                    const { relaunch } = window.__TAURI_PLUGIN_PROCESS__;
+                    await relaunch();
+                }
+            } else {
+                showError('Voce ja esta na versao mais recente.');
+            }
+        } catch (e) {
+            showError('Erro ao verificar atualizacoes: ' + e);
+        }
     });
 }
 

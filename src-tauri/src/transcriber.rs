@@ -290,17 +290,26 @@ pub fn transcribe_with_vulkan_cli(wav_path: &Path, model_path: &Path) -> Result<
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let exe_dir = exe_path
         .parent()
-        .ok_or("Failed to get exe directory")?
-        .join("vulkan-bin");
+        .ok_or("Failed to get exe directory")?;
 
-    let cli_path = exe_dir.join("whisper-cli.exe");
+    // Try multiple locations for vulkan-bin
+    let possible_paths = [
+        exe_dir.join("vulkan-bin"),           // Development / same dir as exe
+        exe_dir.join("resources").join("vulkan-bin"), // Tauri resources subfolder
+        exe_dir.to_path_buf(),                // Files directly in exe dir (flat resources)
+    ];
 
-    if !cli_path.exists() {
-        return Err(format!("whisper-cli.exe not found at {:?}", cli_path));
-    }
+    let cli_path = possible_paths
+        .iter()
+        .map(|p| p.join("whisper-cli.exe"))
+        .find(|p| p.exists())
+        .ok_or_else(|| format!("whisper-cli.exe not found in any of: {:?}", possible_paths))?;
+
+    let vulkan_dir = cli_path.parent().unwrap();
 
     eprintln!("[vulkan] Running whisper-cli from {:?}", cli_path);
     eprintln!("[vulkan] Model: {:?}", model_path);
@@ -315,7 +324,7 @@ pub fn transcribe_with_vulkan_cli(wav_path: &Path, model_path: &Path) -> Result<
         .arg("auto")
         .arg("-nt") // no timestamps in output
         .arg("-np") // no prints (cleaner output)
-        .current_dir(&exe_dir)
+        .current_dir(vulkan_dir)
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("Failed to run whisper-cli: {}", e))?;
