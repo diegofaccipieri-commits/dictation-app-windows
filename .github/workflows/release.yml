@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v1.1.1)"
+        required: true
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build-and-release:
@@ -13,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -53,11 +63,12 @@ jobs:
       - name: Generate latest.json
         shell: pwsh
         run: |
+          $tag = "${{ env.RELEASE_TAG }}"
           $bundleDir = "src-tauri\target\release\bundle\msi"
-          $version = "${{ github.ref_name }}".TrimStart("v")
+          $version = $tag.TrimStart("v")
           $msi = Get-ChildItem "$bundleDir\*.msi" | Where-Object { $_.Name -match '\.msi$' -and $_.Name -notmatch '\.(sig|zip)' } | Select-Object -First 1
           $sig = (Get-Content "$($msi.FullName).sig" -Raw).Trim()
-          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($msi.Name)"
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$($msi.Name)"
           $json = @{
             version = $version
             notes = "DictationApp v$version"
@@ -76,6 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $tag = "${{ env.RELEASE_TAG }}"
           $bundleDir = "src-tauri\target\release\bundle\msi"
           $msi = Get-ChildItem "$bundleDir\*.msi" | Where-Object { $_.Name -match '\.msi$' -and $_.Name -notmatch '\.(sig|zip)' } | Select-Object -First 1
-          gh release create "${{ github.ref_name }}" $msi.FullName latest.json --title "DictationApp ${{ github.ref_name }}" --generate-notes
+          gh release create $tag $msi.FullName latest.json --title "DictationApp $tag" --generate-notes
