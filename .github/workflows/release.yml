@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install LLVM
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "17"
+
+      - name: Download vulkan-bin
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download vulkan-assets --pattern "vulkan-bin.zip" --dir .
+          Expand-Archive -Path vulkan-bin.zip -DestinationPath src-tauri\vulkan-bin
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and sign
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build
+
+      - name: Generate latest.json
+        shell: pwsh
+        run: |
+          $bundleDir = "src-tauri\target\release\bundle\msi"
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $msi = Get-ChildItem "$bundleDir\*.msi" | Where-Object { $_.Name -match '\.msi$' -and $_.Name -notmatch '\.(sig|zip)' } | Select-Object -First 1
+          $sig = (Get-Content "$($msi.FullName).sig" -Raw).Trim()
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($msi.Name)"
+          $json = @{
+            version = $version
+            notes = "DictationApp v$version"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $sig
+                url = $url
+              }
+            }
+          } | ConvertTo-Json -Depth 4
+          [System.IO.File]::WriteAllText("latest.json", $json, [System.Text.UTF8Encoding]::new($false))
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $bundleDir = "src-tauri\target\release\bundle\msi"
+          $msi = Get-ChildItem "$bundleDir\*.msi" | Where-Object { $_.Name -match '\.msi$' -and $_.Name -notmatch '\.(sig|zip)' } | Select-Object -First 1
+          gh release create "${{ github.ref_name }}" $msi.FullName latest.json --title "DictationApp ${{ github.ref_name }}" --generate-notes
