@@ -236,6 +236,7 @@ fn get_settings(state: tauri::State<'_, AppState>) -> settings::AppSettings {
         batch_model: state.batch_model.lock().unwrap().clone(),
         translation_mode: state.translation_mode.lock().unwrap().clone(),
         activation_key: state.activation_key.lock().unwrap().clone(),
+        anthropic_api_key: settings::load().anthropic_api_key,
     }
 }
 
