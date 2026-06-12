@@ -1,5 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const { getVersion } = window.__TAURI__.app;
 
 const statusIcon = document.getElementById('status-icon');
 const statusSpinner = document.getElementById('status-spinner');
@@ -21,6 +22,7 @@ let timerStart = null;
 let timerInterval = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
+    getVersion().then(v => { document.getElementById('version').textContent = `v${v}`; });
     await checkAndDownloadModels();
     await loadModels();
     await loadSettings();
