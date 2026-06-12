@@ -913,6 +913,7 @@ fn main() {
 
             TrayIconBuilder::new()
                 .tooltip("DictationApp")
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
@@ -957,12 +958,12 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Prevent window close from terminating the app
             if let Some(window) = app.get_webview_window("main") {
+                let win = window.clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        log_debug("Window close requested - hiding instead");
                         api.prevent_close();
+                        let _ = win.hide();
                     }
                 });
             }
