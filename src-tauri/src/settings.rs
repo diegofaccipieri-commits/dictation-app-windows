@@ -23,8 +23,6 @@ pub struct AppSettings {
     pub batch_model: String,
     pub translation_mode: String,
     pub activation_key: String,
-    #[serde(default)]
-    pub anthropic_api_key: String,
 }
 
 impl Default for AppSettings {
@@ -34,7 +32,6 @@ impl Default for AppSettings {
             batch_model: MODEL_TURBO.to_string(),
             translation_mode: TRANSLATION_OFF.to_string(),
             activation_key: ACTIVATION_CTRL.to_string(),
-            anthropic_api_key: String::new(),
         }
     }
 }
